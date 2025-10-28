@@ -1,22 +1,12 @@
-# SSL Orchestrator Consolidated Services Architecture
+# SSL Orchestrator Consolidated Services Lite
 Docker compose configurations to create all of the SSLO security services on a single Ubuntu VM, to both simplify and dramatically reduce resource utilization in a virtual environment.
 
 ## About
 This Docker Compose configuration supports the **F5 UDF** demo environment, which itself supports 802.1Q VLAN tags. This also reduces the number of physical interfaces and connections required. The Docker Compose "server" file contains:
 
 - An inline layer 3 inspection service with Suricata
-- An inline transparent proxy inspection service with Squid
-- An inline explicit proxy inspection service with Squid
 - An ICAP inspection service with c-icap and Clamav
-- A TAP inspection service with Suricata
-- A Wireshark TAP inspection service with web interface on port 3000
 - An NGINX webserver instance listening on HTTP:80 and HTTPS:443 with a sample travel site, and HTTPS:444 supporting PQC ciphers
-- A Juiceshop webserver instance for WAF testing
-- A Syslog server with web interface configured to capture ICAP server logs, listening on port 8282
-
-The Docker Compose "client" file contains:
-
-- A Guacamole (jumphost) instance to provide web-based RDP access to the Client VM desktop
 
 ## Installation / Instructions
 
@@ -44,18 +34,10 @@ sudo usermod -aG docker ${USER}
 
   * Management (ens5)
   * Layer 3 services (ens6)
-  * Tap service (ens7)
-  * Layer 2 service inbound (ens8)
-  * Layer 2 service outbound (ens9)
  
-* **Step 2**: Configure bridging for the Layer 2 service
+* **Step 2**: Configure networking
 
-  * Install and configure bridge-utils:
-    ```bash
-    sudo apt-get update -y
-    sudo apt-get install bridge-utils -y
-    ```
-  * Configure the network bridge and other interfaces via Netplan. The following assumes ens7 and ens8 are the two interfaces to bridge:
+  * Configure the interfaces via Netplan.
     ```bash
     sudo vi /etc/netplan/50-cloud-init.yaml
   
@@ -68,30 +50,13 @@ sudo usermod -aG docker ${USER}
         ens6:
             dhcp4: false
             dhcp6: false
-        ens7:
-            dhcp4: false
-            dhcp6: false
-        ens8:
-            dhcp4: false
-            dhcp6: false
-        ens9:
-            dhcp4: false
-            dhcp6: false
-  
-    bridges:
-        br0:
-           interfaces:
-             - ens7
-             - ens8
-           dhcp4: false
-           dhcp6: false
     ```
   * Update the Netplan configuration and then verify:
     ```bash
     sudo netplan apply
     ifconfig
     ```
-  * Disable iptables processing on the bridge interfaces:
+  * Disable iptables processing:
     ```bash
     sudo su
     echo "0" > /proc/sys/net/bridge/bridge-nf-call-iptables
@@ -101,8 +66,8 @@ sudo usermod -aG docker ${USER}
 * **Step 3**: Download the configuration package:
 
   ```bash
-  git clone https://github.com/kevingstewart/sslo-consolidated-services.git
-  cd sslo-consolidated-services
+  git clone https://github.com/kevingstewart/sslo-consolidated-services-lite.git
+  cd sslo-consolidated-services-lite
   ```
   
 * **Step 4**: Modify the YAML files (as required)
@@ -112,12 +77,8 @@ sudo usermod -aG docker ${USER}
   | Service                   | Interface(s)       | Address(es)                         |
   |---------------------------|--------------------|-------------------------------------|
   | Layer 3 Service           | ens6.60<br>ens6.70 | 198.19.64.30/25<br>198.19.64.130/25 |
-  | Explicit Proxy Service    | ens6.30<br>ens6.40 | 198.19.96.30/25<br>198.19.96.130/25 |
-  | Transparent Proxy Service | ens6.10<br>ens6.20 | 198.19.98.30/25<br>198.19.98.130/25 |
   | ICAP service              | ens6.50            | 198.19.97.50/25                     |
   | Webserver / Juiceshop     | ens6.80            | 192.168.100.0/24                    |
-  | TAP Service               | ens7.1000          | ---                                 |
-  | Wireshark TAP Service     | ens7.1001          | ---                                 |
   
 * **Step 5**: Deploy the containers
 
@@ -136,9 +97,6 @@ sudo usermod -aG docker ${USER}
     * Port 80: HTTP listener with sample travel site content
     * Port 443: HTTPS listener with sample travel site content
     * Port 444: HTTPS listener with PQC cipher enabled (X25519MLKEM768) and simple HTTP response with negotiated TLS information
-  * The Juiceshop instance is listening on 192.168.100.20, port 3000
-  * Wireshark TAP service web interface is listening on the management network interface IP, port 3000
-  * The syslog service web interface is listening on the management network interface IP, port 8282
 
 ----
 
@@ -212,97 +170,6 @@ Below find the configuration details for all of the containers maintained in thi
     jq 'select(.alert .signature_id==2100498)' /var/log/suricata/eve.json
     ```
 </details>
-
-
-<details>
-<summary><b>Explicit Proxy Service</b></summary>
-
-* Ubuntu:bionic base image with Squid installation and routing configuration
-* Routing configuration:
-  ```bash
-  ip route delete default
-  ip route add default via $ARG_SVC_GATEWAY
-  ip route add $ARG_CLIENT_SUBNET via $ARG_SVC_INGRESS
-  ipaddr=$(ip addr show dev eth0 |egrep -o 'inet [0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.' | cut -d' ' -f2) && ip route add 8.8.8.8 via ${ipaddr}1
-  echo "nameserver 8.8.8.8" > /etc/resolv.conf
-  ```
-* Compose environment variables:
-  ```bash
-  - TZ=UTC
-  - UPDATE_EP=1
-  - ARG_SVC_GATEWAY=198.19.96.245
-  - ARG_CLIENT_SUBNET=10.1.10.0/24
-  - ARG_SVC_INGRESS=198.19.96.7
-  ```
-* Squid Configuration (/etc/squid/squid.conf):
-  ```bash
-  acl SSL_ports port 443
-  acl Safe_ports port 80
-  acl Safe_ports port 443
-  acl Safe_ports port 1025-65535
-  acl CONNECT method CONNECT
-  
-  http_access deny !Safe_ports
-  http_access deny CONNECT !SSL_ports
-  http_access allow localhost manager
-  http_access deny manager
-  http_access allow localhost
-  http_access allow all
-  http_port 3128
-  
-  coredump_dir /var/spool/squid
-  
-  refresh_pattern -i (/cgi-bin/|\?) 0	0%	0
-  refresh_pattern (Release|Packages(.gz)*)\$      0       20%     2880
-  refresh_pattern .		0	20%	4320
-  
-  cache deny all
-  
-  logfile_rotate 0
-  logformat authheader %ts.%03tu %6tr %>a %Ss/%03>Hs %<st %rm %ru "%{X-Authenticated-User}>h" %Sh/%<a %mt
-  access_log /var/log/squid/access.log authheader
-  ```
-</details>
-
-
-<details>
-<summary><b>Transparent Proxy Service</b></summary>
-
-* Ubuntu:bionic base image with Squid installation and routing configuration
-* Routing configuration:
-  ```bash
-  sysctl net.ipv4.ip_forward=1
-  sed -i -e 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/g' /etc/sysctl.conf
-  iptables -t nat -A PREROUTING -i eth1 -p tcp --dport 80 -j REDIRECT --to-port 3128
-
-  ip route delete default
-  ip route add default via $ARG_SVC_GATEWAY
-  ip route add $ARG_CLIENT_SUBNET via $ARG_SVC_INGRESS
-  ipaddr=$(ip addr show dev eth0 |egrep -o 'inet [0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.' | cut -d' ' -f2) && ip route add 8.8.8.8 via ${ipaddr}1
-  echo "nameserver 8.8.8.8" > /etc/resolv.conf
-  ```
-* Compose environment variables:
-  ```bash
-  - TZ=UTC
-  - UPDATE_EP=1
-  - ARG_SVC_GATEWAY=198.19.98.245
-  - ARG_CLIENT_SUBNET=10.1.10.0/24
-  - ARG_SVC_INGRESS=198.19.98.7
-  ```
-* Squid Configuration (/etc/squid/squid.conf):
-  ```bash
-  http_access allow all
-  http_port 3128
-  
-  coredump_dir /var/spool/squid
-  cache deny all
-  
-  logfile_rotate 0
-  logformat authheader %ts.%03tu %6tr %>a %Ss/%03>Hs %<st %rm %ru "%{X-Authenticated-User}>h" %Sh/%<a %mt
-  access_log /var/log/squid/access.log authheader
-  ```
-</details>
-
 
 <details>
 <summary><b>ICAP Service</b></summary>
@@ -385,47 +252,6 @@ Below find the configuration details for all of the containers maintained in thi
 
 
 <details>
-<summary><b>TAP Service</b></summary>
-
-* Ubuntu 20.04 base image with Suricata installation
-* Compose environment variables:
-  ```bash
-  - INTERFACE=eth1
-  ```
-* Testing Suricata:
-  * Reference: [Digital Ocean](https://www.digitalocean.com/community/tutorials/how-to-install-suricata-on-ubuntu-20-04)
-  * Access the container shell:
-    ```bash
-    docker exec -it service-tap /bin/bash
-    ```
-  * Tail the Suricate fast log:
-    ```bash
-    tail -f /var/log/suricata/fast.log
-    ```
-  * Access the following URL:
-    ```bash
-    curl http://testmynids.org/uid/index.html
-    ```
-  * The output of the fast log will log for this request will look something like the below:
-    ```bash
-    Output 10/21/2021-18:35:54.950106  [**] [1:2100498:7] GPL ATTACK_RESPONSE id check returned root [**] [Classification: Potentially Bad Traffic] [Priority: 2] {TCP} 2600:9000:2000:4400:0018:30b3:e400:93a1:80 -> 2001:DB8::1:34628
-    ```
-  * Access the Suricata eve (JSON) log to show additional information on the detection:
-    ```bash
-    jq 'select(.alert .signature_id==2100498)' /var/log/suricata/eve.json
-    ```
-</details>
-
-
-<details>
-<summary><b>Wireshark TAP Service</b></summary>
-
-* The Wireshark TAP service pulls down the latest ```lscr.io/linuxserver/wireshark:latest``` image and is included in the TAP service Compose file
-* The web interface is accessible on port 3000
-</details>
-
-
-<details>
 <summary><b>Webserver Utility</b></summary>
 
 * Ubuntu 24.04 base image with OpenSSL 3.5 and NGINX 1.27.4 installations
@@ -481,22 +307,6 @@ Below find the configuration details for all of the containers maintained in thi
       }
   }
   ```
-</details>
-
-
-<details>
-<summary><b>Juiceshop Utility</b></summary>
-
-* The Juiceshop Utility pulls down the latest ```bkimminich/juice-shop``` image
-* The web interface is accessible on port 3000, HTTP
-</details>
-
-
-<details>
-<summary><b>Syslog Utility</b></summary>
-
-* The Syslog Utility pulls down the latest ```pierredavidbelanger/raftman``` image
-* The web interface is accessible on port 8282, HTTP
 </details>
 
 
