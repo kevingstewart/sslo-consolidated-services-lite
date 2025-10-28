@@ -56,12 +56,6 @@ sudo usermod -aG docker ${USER}
     sudo netplan apply
     ifconfig
     ```
-  * Disable iptables processing:
-    ```bash
-    sudo su
-    echo "0" > /proc/sys/net/bridge/bridge-nf-call-iptables
-    exit
-    ```
     
 * **Step 3**: Download the configuration package:
 
