@@ -1,12 +1,7 @@
 include:
-    - server-services/utility-syslogview-compose.yaml
     - server-services/service-icap-compose.yaml
-    - server-services/service-proxy-explicit-compose.yaml
-    - server-services/service-proxy-transparent-compose.yaml
     - server-services/service-layer3-compose.yaml
-    - server-services/service-tap-compose.yaml
     - server-services/utility-webserver-compose.yaml
-    - server-services/utility-juiceshop-compose.yaml
 
 networks:
   default:
